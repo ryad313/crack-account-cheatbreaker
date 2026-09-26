@@ -652,6 +652,13 @@ def check_update():
     if not getattr(sys, "frozen", False):
         show("Checking for updates OK (source run)")
         return
+    # a running exe can be renamed but not deleted: the .old backup left by the
+    # previous self-update is removed here, once nothing executes from it
+    try:
+        if os.path.exists(sys.executable + ".old"):
+            os.remove(sys.executable + ".old")
+    except PermissionError:
+        pass
     try:
         req = urllib.request.Request(UPDATE_URL, headers={"User-Agent": "cia-patcher"})
         with urllib.request.urlopen(req, timeout=5) as r:
@@ -676,7 +683,8 @@ def check_update():
         except Exception:
             os.rename(bak, exe)   # rollback: keep the current version working
             raise
-        os.remove(bak)
+        # the .old backup is deleted on the next startup (a running exe
+        # cannot be deleted on Windows)
         show(f"Updating to v{remote} OK")
         # strip PyInstaller parent markers: the relaunched exe must behave like a
         # fresh external launch, not validate a parent that is about to exit
