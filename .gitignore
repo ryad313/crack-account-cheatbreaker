@@ -1,0 +1,12 @@
+*.exe
+*.exe.old
+*.exe.new
+*.old
+*.new
+*.pyc
+__pycache__/
+*.spec
+build/
+dist/
+accounts_user_backup.json
+*accounts*backup*
