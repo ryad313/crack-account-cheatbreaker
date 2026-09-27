@@ -35,7 +35,7 @@ except ImportError:
 HEADER = f"cia patcher {BUILD_DATE} at {BUILD_TIME} on cheatbreaker {VERSION}"
 
 # self-update: pinned to the latest.json published in the patcher repository
-PATCHER_VERSION = "1.1.0"
+PATCHER_VERSION = "1.1.1"
 UPDATE_URL = ("https://raw.githubusercontent.com/ryad313/crack-account-cheatbreaker/main/latest.json")
 
 # ---------------------------------------------------------------- JS patches (renderer bundle)
@@ -88,6 +88,15 @@ JS_PATCHES = [
         '_ent=_mf.versions.find(function(_v){return _v.id===_ver});'
         'if(!_ent)throw new Error("version "+_ver+" not found in Mojang manifest");'
         'var _vj=await(await fetch(_ent.url)).json();'
+        # convert Mojang single-artifact natives classifiers to the CB files-map
+        # format, otherwise getNatives crashes on Object.entries(undefined)
+        '_vj.libraries.forEach(function(_l){'
+        'var _c=_l.downloads&&_l.downloads.classifiers;'
+        'if(!_c)return;'
+        'Object.keys(_c).forEach(function(_k){'
+        'var _e=_c[_k];'
+        'if(_e&&!_e.files)_c[_k]={sha1:_e.sha1,size:_e.size,url:_e.url,'
+        'files:{natives:{url:_e.url,sha1:_e.sha1,size:_e.size}}}})});'
         'await H.mkdir(_dir,{recursive:!0}),'
         'await H.writeFile(_pj,JSON.stringify(_vj),"utf-8");'
         'var _cl=await fetch(_vj.downloads.client.url);'
@@ -136,11 +145,15 @@ JS_PATCHES = [
         '||Ce({title:"Disconnected from Asset Server"',
     ),
     (
-        "client jar keep",
+        # universal bootstrap: with any offline account present, guarantee the
+        # version json (natives classifiers converted to the CB files-map format)
+        # and the client jar exist BEFORE launch, whatever the ContinueLaunch
+        # source (real server response or synthesized fallback)
+        "client bootstrap",
         'e.n=8,ke((0,q.join)(i,"versions",t,"".concat(t,".patch")),o.hash)',
         'e.n=8,na.accounts.some(function(e){return"0"===e.accessToken})?'
-        'Promise.resolve(!0):ke((0,q.join)(i,"versions",t,"".concat(t,".patch")),o.hash)',
-        "na.accounts.some(function(e){return\"0\"===e.accessToken})?Promise.resolve(!0)",
+        '(async function(){try{var _pj=(0,q.join)(i,"versions",t,"".concat(t,".json")),_pp=(0,q.join)(i,"versions",t,"".concat(t,".patch"));if(!(0,Z.existsSync)(_pp)||!(0,Z.existsSync)(_pj)){vr.log("CB Offline: bootstrapping "+t);var _mf=await(await fetch("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")).json(),_ent=_mf.versions.find(function(_v){return _v.id===(t)});if(!_ent)throw new Error("version not found in Mojang manifest");var _vj=await(await fetch(_ent.url)).json();_vj.libraries.forEach(function(_l){var _c=_l.downloads&&_l.downloads.classifiers;if(!_c)return;Object.keys(_c).forEach(function(_k){var _e=_c[_k];if(_e&&!_e.files)_c[_k]={sha1:_e.sha1,size:_e.size,url:_e.url,files:{natives:{url:_e.url,sha1:_e.sha1,size:_e.size}}}})});await H.mkdir((0,q.join)(i,"versions",t),{recursive:!0}),await H.writeFile(_pj,JSON.stringify(_vj),"utf-8");if(!(0,Z.existsSync)(_pp)){var _cl=await fetch(_vj.downloads.client.url);await H.writeFile(_pp,Buffer.from(await _cl.arrayBuffer())),return !0;}}else{var _ex=JSON.parse((0,Z.readFileSync)(_pj,"utf-8"));_ex.libraries.forEach(function(_l){var _c=_l.downloads&&_l.downloads.classifiers;if(!_c)return;Object.keys(_c).forEach(function(_k){var _e=_c[_k];if(_e&&!_e.files)_c[_k]={sha1:_e.sha1,size:_e.size,url:_e.url,files:{natives:{url:_e.url,sha1:_e.sha1,size:_e.size}}}})});await H.writeFile(_pj,JSON.stringify(_ex),"utf-8");return !0;}}catch(_e){vr.error("CB Offline: bootstrap failed: "+_e)}})():ke((0,q.join)(i,"versions",t,"".concat(t,".patch")),o.hash)',
+        'var _ex=JSON.parse((0,Z.readFileSync)(_pj,"utf-8"))',
     ),
     (
         # v1.0.0 installs carry the old javaVersion:"8" (JRE 8 URL is 404 on r2);
@@ -149,6 +162,16 @@ JS_PATCHES = [
         '_res({branch:"offline",client:"",hash:"offline",version:_ver,javaVersion:"8"})',
         '_res({branch:"offline",client:"",hash:"offline",version:_ver,javaVersion:"25"})',
         'javaVersion:"25"})',
+    ),
+    (
+        # v1.0.0/v1.1.0 installs skipped the md5 check without ensuring the files:
+        # migrate their P7 to the universal bootstrap form
+        "migrate jar ensure",
+        'e.n=8,na.accounts.some(function(e){return"0"===e.accessToken})?'
+        'Promise.resolve(!0):ke((0,q.join)(i,"versions",t,"".concat(t,".patch")),o.hash)',
+        'e.n=8,na.accounts.some(function(e){return"0"===e.accessToken})?'
+        '(async function(){try{var _pj=(0,q.join)(i,"versions",t,"".concat(t,".json")),_pp=(0,q.join)(i,"versions",t,"".concat(t,".patch"));if(!(0,Z.existsSync)(_pp)||!(0,Z.existsSync)(_pj)){vr.log("CB Offline: bootstrapping "+t);var _mf=await(await fetch("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")).json(),_ent=_mf.versions.find(function(_v){return _v.id===(t)});if(!_ent)throw new Error("version not found in Mojang manifest");var _vj=await(await fetch(_ent.url)).json();_vj.libraries.forEach(function(_l){var _c=_l.downloads&&_l.downloads.classifiers;if(!_c)return;Object.keys(_c).forEach(function(_k){var _e=_c[_k];if(_e&&!_e.files)_c[_k]={sha1:_e.sha1,size:_e.size,url:_e.url,files:{natives:{url:_e.url,sha1:_e.sha1,size:_e.size}}}})});await H.mkdir((0,q.join)(i,"versions",t),{recursive:!0}),await H.writeFile(_pj,JSON.stringify(_vj),"utf-8");if(!(0,Z.existsSync)(_pp)){var _cl=await fetch(_vj.downloads.client.url);await H.writeFile(_pp,Buffer.from(await _cl.arrayBuffer())),return !0;}}else{var _ex=JSON.parse((0,Z.readFileSync)(_pj,"utf-8"));_ex.libraries.forEach(function(_l){var _c=_l.downloads&&_l.downloads.classifiers;if(!_c)return;Object.keys(_c).forEach(function(_k){var _e=_c[_k];if(_e&&!_e.files)_c[_k]={sha1:_e.sha1,size:_e.size,url:_e.url,files:{natives:{url:_e.url,sha1:_e.sha1,size:_e.size}}}})});await H.writeFile(_pj,JSON.stringify(_ex),"utf-8");return !0;}}catch(_e){vr.error("CB Offline: bootstrap failed: "+_e)}})():ke((0,q.join)(i,"versions",t,"".concat(t,".patch")),o.hash)',
+        'var _ex=JSON.parse((0,Z.readFileSync)(_pj,"utf-8"))',
     ),
     (
         "token refresh guard",
@@ -168,17 +191,29 @@ JS_PATCHES = [
 EMBEDDED_JSON = "embedded_classes.json"
 
 
-def load_embedded():
-    candidates = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), EMBEDDED_JSON),
-        os.path.join(os.getcwd(), EMBEDDED_JSON),
-        os.path.join(os.path.dirname(sys.executable), EMBEDDED_JSON),
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            with open(path, "r") as f:
-                return json.load(f)
-    return None
+def load_java_assets():
+    """Extract the embedded javassist.jar + PatchGeneric classes to a temp dir."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in [os.path.join(here, "embedded_java.json"),
+                 os.path.join(os.getcwd(), "embedded_java.json"),
+                 os.path.join(os.path.dirname(sys.executable), "embedded_java.json")]:
+        if os.path.exists(cand):
+            assets = json.load(open(cand))
+            break
+    else:
+        return None, None
+    d = tempfile.mkdtemp(prefix="cia_java_")
+    for name, b64 in assets.items():
+        out = os.path.join(d, name)
+        with open(out, "wb") as f:
+            f.write(base64.b64decode(b64))
+    jar = os.path.join(d, "javassist.jar")
+    classes_dir = os.path.join(d, "pgclasses")
+    os.makedirs(classes_dir, exist_ok=True)
+    for name in list(assets):
+        if name.endswith(".class"):
+            shutil.move(os.path.join(d, name), os.path.join(classes_dir, name))
+    return jar, classes_dir
 
 
 # ---------------------------------------------------------------- output helpers
@@ -424,8 +459,31 @@ def pack_asar(src_dir, out_path, unpack_prefix):
 
 PATCH_COUNTS = {
     "connecting gate (launch)": (2,),
-    "migrate java version": (0, 1),   # absent on pristine and on fresh patches
+    "client bootstrap": (0, 1),          # 0 on installs already migrated
+    "migrate java version": (0, 1),
+    "migrate jar ensure": (0, 1),
 }
+
+# write-file-atomic (utilise par electron-settings): rename atomique sans retry
+# -> EPERM recurrent sur Windows quand AV/indexer/2e instance tient le fichier.
+WFA_PATCHES = [
+    (
+        "atomic rename retry (async)",
+        "    await promisify(fs.rename)(tmpfile, truename)",
+        "    { let _ra = 0; for (;;) { try { await promisify(fs.rename)(tmpfile, truename); break; }"
+        " catch (_e) { if ((_e.code !== 'EPERM' && _e.code !== 'EACCES') || ++_ra > 4) throw _e;"
+        " await new Promise(_r => setTimeout(_r, 150 * _ra)); } } }",
+        "++_ra > 4",
+    ),
+    (
+        "atomic rename retry (sync)",
+        "    fs.renameSync(tmpfile, filename)",
+        "    { let _rs = 0; for (;;) { try { fs.renameSync(tmpfile, filename); break; }"
+        " catch (_e) { if ((_e.code !== 'EPERM' && _e.code !== 'EACCES') || ++_rs > 4) throw _e;"
+        " const _d = Date.now(); while (Date.now() - _d < 150 * _rs); } } }",
+        "++_rs > 4",
+    ),
+]
 
 
 def patch_js_source(code):
@@ -463,7 +521,14 @@ def patch_launcher():
         js_blob = blob[off:off + size]
         # skip only when EVERY patch marker is present (a partially patched
         # install must still receive the missing patches)
-        if all(marker.encode() in js_blob for _, _, _, marker in JS_PATCHES):
+        js_done = all(marker.encode() in js_blob for _, _, _, marker in JS_PATCHES)
+        wfa_done = False
+        try:
+            w_entry = header["files"]["node_modules"]["files"]["write-file-atomic"]["files"]["index.js"]
+            wfa_done = "++_ra > 4".encode() in blob[int(w_entry["offset"]): int(w_entry["offset"]) + w_entry["size"]]
+        except KeyError:
+            wfa_done = True  # pas de write-file-atomic dans ce bundle
+        if js_done and wfa_done:
             show("Patching launcher OK (already patched)")
             return
 
@@ -490,7 +555,24 @@ def patch_launcher():
         code, applied, _ = patch_js_source(code)
         with open(js_path, "w", encoding="utf-8", newline="") as f:
             f.write(code)
+
+        wfa = os.path.join(tmp, "node_modules", "write-file-atomic", "index.js")
+        if os.path.exists(wfa):
+            with open(wfa, encoding="utf-8") as f:
+                wfa_code = f.read()
+            for name, anchor, replacement, marker in WFA_PATCHES:
+                if marker in wfa_code:
+                    continue
+                n = wfa_code.count(anchor)
+                if n != 1:
+                    fail(f"write-file-atomic anchor '{name}' found {n}x - unsupported build")
+                wfa_code = wfa_code.replace(anchor, replacement)
+            with open(wfa, "w", encoding="utf-8", newline="") as f:
+                f.write(wfa_code)
+
         _node_syntax_gate(js_path)
+        if os.path.exists(wfa):
+            _node_syntax_gate(wfa)
         show(f"Patching launcher... {len(applied)} patches")
 
         tmp_asar = asar + ".tmp"
@@ -560,52 +642,75 @@ def _replace_with_retry(src, dst):
 
 
 # ---------------------------------------------------------------- step: game client
-def patch_client(embedded):
+def patch_client(java_exe, java_assets):
     show("Patching game client...")
-    if not embedded:
-        fail("internal error: embedded class data missing from this build")
-    if not os.path.isdir(CLIENTS_DIR):
-        show("Patching game client... SKIPPED (launch the game once, then run cia patcher again)")
+    if not java_exe:
+        show("Patching game client... SKIPPED (no Java found - launch the game once, then rerun)")
         return
-    done, skipped = [], []
-    for ver, spec in sorted(embedded.items()):
+    if not os.path.isdir(CLIENTS_DIR):
+        show("Patching game client... SKIPPED (launch the game once, then rerun)")
+        return
+
+    javassist_jar, pg_dir = java_assets
+    done, failed = [], []
+    for ver in sorted(os.listdir(CLIENTS_DIR)):
         jar = os.path.join(CLIENTS_DIR, ver, ver + ".patch")
-        if not os.path.exists(jar):
+        if not os.path.isfile(jar):
             continue
-        cls = spec["class"]
-        try:
-            with zipfile.ZipFile(jar) as z:
-                current = z.read(cls)
-        except KeyError:
-            skipped.append(f"{ver} (no CB client class - vanilla jar, fine)")
+        outdir = tempfile.mkdtemp(prefix="cia_pg_")
+        cp = javassist_jar + os.pathsep + pg_dir
+        r = subprocess.run([java_exe, "-cp", cp, "PatchGeneric", jar, outdir],
+                           capture_output=True, text=True, errors="replace")
+        log = (r.stdout or "") + (r.stderr or "")
+        if r.returncode != 0:
+            tail = [l for l in log.splitlines() if l.strip()][-1:] or ["?"]
+            failed.append(f"{ver}: {tail[0][:80]}")
             continue
-        if hashlib.sha256(current).hexdigest() != spec["original_sha256"]:
-            skipped.append(f"{ver} (unsupported client build)")
-            continue
-            backup = jar + ".ORIGINAL"
-            if not os.path.exists(backup):
-                shutil.copy2(jar, backup)
-            patched = base64.b64decode(spec["patched_b64"])
-            tmp = jar + ".tmp"
-            with zipfile.ZipFile(jar) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
-                for item in zin.infolist():
-                    data = patched if item.filename == cls else zin.read(item.filename)
-                    zout.writestr(item, data)
-            for attempt in range(5):
-                try:
-                    os.replace(tmp, jar)
-                    break
-                except PermissionError:
-                    if attempt == 4:
-                        fail(f"{ver}.patch is locked by another process")
-                    time.sleep(1)
-            done.append(ver)
-    if skipped:
-        show(f"Patching game client... skipped: {'; '.join(skipped)}")
-    if done:
-        show(f"Patching game client OK ({', '.join(done)})")
-    elif not skipped:
-        show("Patching game client OK (already patched)")
+        # injecter les classes patchees dans le jar
+        patched = {}
+        for root, dirs, files in os.walk(outdir):
+            for f in files:
+                if f.endswith(".class"):
+                    full = os.path.join(root, f)
+                    rel = os.path.relpath(full, outdir).replace("\\", "/")
+                    patched[rel] = open(full, "rb").read()
+        tmp = jar + ".tmp"
+        with zipfile.ZipFile(jar) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+            injected = 0
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename in patched:
+                    data = patched[item.filename]
+                    injected += 1
+                zout.writestr(item, data)
+            for rel, data in patched.items():
+                if rel not in zin.namelist():
+                    zout.writestr(rel, data)
+                    injected += 1
+        _replace_with_retry(tmp, jar)
+        done.append(f"{ver} ({injected} classes)")
+        shutil.rmtree(outdir, ignore_errors=True)
+    if failed:
+        fail("game client patch failed: " + " | ".join(failed))
+    show("Patching game client OK (" + "; ".join(done) + ")")
+
+
+def find_java_exe():
+    candidates = [os.path.join(os.environ.get("APPDATA", ""), "CheatBreaker", "jre", "bin", "java.exe")]
+    jres = os.path.join(os.environ.get("APPDATA", ""), "CheatBreaker", "jres")
+    if os.path.isdir(jres):
+        import glob as _g
+        candidates += _g.glob(os.path.join(jres, "*", "bin", "java.exe"))
+        candidates += _g.glob(os.path.join(jres, "*", "*", "bin", "java.exe"))
+    w = shutil.which("java")
+    if w:
+        candidates.append(w)
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return None
+
+
 
 
 # ---------------------------------------------------------------- step: account
@@ -735,7 +840,11 @@ def main():
 
         patch_launcher()
 
-        patch_client(load_embedded())
+        java_exe = find_java_exe()
+        java_assets = load_java_assets()
+        if java_exe and not java_assets:
+            show("Java assets... missing (embedded_java.json)")
+        patch_client(java_exe, java_assets)
 
         add_account(name)
 
