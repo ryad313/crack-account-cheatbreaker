@@ -189,6 +189,17 @@ JS_PATCHES = [
         'var _ex=JSON.parse((0,Z.readFileSync)(_pj,"utf-8"))',
     ),
     (
+        # the CB server can force-close the launcher (update packet -> download
+        # Setup -> app.exit(0)), wiping the patched install mid-launch. Blocked
+        # while any offline account exists.
+        "forced update block",
+        "case 18:return P=n.data,e.n=19,zn(P.launcher,P.launcherVersion);case 19:_.app.exit(0);",
+        'case 18:if(na.accounts.some(function(e){return"0"===e.accessToken})){'
+        'vr.log("CB Offline: forced launcher update blocked");return e.a(3,21)}'
+        "P=n.data,zn(P.launcher,P.launcherVersion);case 19:_.app.exit(0);",
+        "forced launcher update blocked",
+    ),
+    (
         "token refresh guard",
         'if(e.p=0,!(new Date(t.accessTokenExpiresAt).getTime()>Date.now())||n){',
         # a forced refresh (server close "account session was not valid") must never

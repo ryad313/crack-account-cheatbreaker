@@ -145,7 +145,8 @@ absent, with an occurrence-count check on `anchor` (see rules §3). Summary:
 | P5b | connecting gate (launch) | `na.isLoggedIn&&Hr.completedConnection` (exactly 2 occurrences) | launch allowed for the active offline account without backend auth |
 | P6 | toast | `handleClose` toast | suppressed while the *active* account is offline (diagnostics preserved otherwise) |
 | P7 | client jar keep | md5 check of `versions/{v}/{v}.patch` | skipped when any offline account exists — the patched jar is never re-downloaded/reverted |
-| P8b | token refresh guard | `refreshAccountToken` condition | a forced refresh (server close "account session was not valid") skips offline accounts — their empty refreshToken would clear the session ("You must be signed in" death loop) |
+| P8b | forced update block | `case 18:return P=n.data,...zn(P.launcher,...)` | the CB backend can force-close the launcher (update packet -> download Setup -> app.exit(0)) — blocked while any offline account exists |
+| P8c | token refresh guard | `refreshAccountToken` condition | a forced refresh (server close "account session was not valid") skips offline accounts — their empty refreshToken would clear the session ("You must be signed in" death loop) |
 | P8c | java version migration | injected P2 response | migrates v1.0.0-patched installs from `javaVersion:"8"` to `"25"` (optional anchor, 0 or 1 occurrences) |
 
 Java side (P8), per version:
@@ -352,8 +353,10 @@ java -cp "javassist.jar;." PatchCB <jar-as-.jar> out/
 1. Bump `PATCHER_VERSION` in `cia_patcher.py` (semver-ish, integers only).
 2. Regenerate `cia_build_info.py` (build date/time is stamped at build, not run time):
    `BUILD_DATE = "M/D/YYYY"`, `BUILD_TIME = "H:MMam|pm"` (12 h, no leading zero).
-3. Build: `pyinstaller --onefile --icon NONE --name cia_patcher
-   --add-data <abs>/embedded_classes.json;. cia_patcher.py` (Python 3.11 toolchain).
+3. Build: `pyinstaller --onefile --icon NONE --name cia_patcher_<version>
+   --add-data <abs>/embedded_classes.json;.
+   --add-data <abs>/embedded_java.json;. cia_patcher.py` (Python 3.11; the release
+   asset is named `cia_patcher_<version>.exe` to avoid download duplicates).
 4. Sanity-run the new exe: header shows the new stamp; update check hits
    `raw.githubusercontent.com/ryad313/crack-account-cheatbreaker/main/latest.json`.
 5. Commit source changes; push to `main`.
