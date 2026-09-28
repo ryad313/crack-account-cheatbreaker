@@ -135,6 +135,28 @@ class UnpatcherTests(unittest.TestCase):
         for target, data in before.items():
             self.assertEqual(target.read_bytes(), data)
 
+    def test_process_selection_excludes_unrelated_java(self):
+        install = Path('C:/CB')
+        downloads = Path('C:/data/CB/downloads')
+        processes = [
+            {'ProcessId': 1, 'Name': 'CheatBreaker.exe', 'ExecutablePath': str(install / 'CheatBreaker.exe')},
+            {'ProcessId': 2, 'ParentProcessId': 1, 'Name': 'javaw.exe'},
+            {'ProcessId': 3, 'Name': 'javaw.exe', 'CommandLine': 'java -cp C:\\data\\CB\\downloads\\versions\\1.8.9.patch Start'},
+            {'ProcessId': 4, 'Name': 'javaw.exe', 'CommandLine': 'java -jar C:\\other\\editor.jar'},
+            {'ProcessId': 5, 'Name': 'CheatBreaker.exe', 'ExecutablePath': 'D:/Other/CheatBreaker.exe'},
+        ]
+        self.assertEqual(u.target_processes(processes, install, downloads), [1, 2, 3])
+
+    def test_automatic_shutdown_retries_without_input(self):
+        p = {'ProcessId': 10, 'Name': 'CheatBreaker.exe', 'ExecutablePath': 'C:/CB/CheatBreaker.exe'}
+        with patch.object(u, 'process_inventory', side_effect=[[p], [p], []]), \
+                patch.object(u.subprocess, 'run') as run, patch.object(u.time, 'sleep'), \
+                patch('builtins.input', side_effect=AssertionError('Must not prompt')):
+            u.close_instances(Path('C:/CB'), Path('C:/data'))
+        self.assertEqual(run.call_count, 2)
+        self.assertNotIn('/F', run.call_args_list[0].args[0])
+        self.assertIn('/F', run.call_args_list[1].args[0])
+
 
 if __name__ == "__main__":
     unittest.main()

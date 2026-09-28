@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import ntpath
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,7 @@ import time
 import zipfile
 
 VERSION = "1.1.7"
+BUILD = "automatic"
 
 
 def digest(path):
@@ -230,32 +232,74 @@ def apply_plan(actions, backup_root):
     return session
 
 
-def running_game():
-    # Inspect process names only. Never terminate unrelated Java applications.
-    for name in ("CheatBreaker.exe", "javaw.exe"):
-        result = subprocess.run(["tasklist", "/FI", "IMAGENAME eq " + name, "/FO", "CSV", "/NH"],
-                                capture_output=True, text=True, errors="replace", check=True)
-        if '"' + name.lower() + '"' in result.stdout.lower():
-            return True
-    return False
+def process_inventory():
+    command = ("Get-CimInstance Win32_Process -Filter \"Name='CheatBreaker.exe' OR "
+               "Name='javaw.exe' OR Name='java.exe'\" | "
+               "Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine | "
+               "ConvertTo-Json -Compress")
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+                            capture_output=True, text=True, errors="replace", check=True)
+    data = json.loads(result.stdout or "[]")
+    return data if isinstance(data, list) else [data]
+
+
+def target_processes(processes, install, downloads):
+    executable = ntpath.normcase(ntpath.normpath(str(install / "CheatBreaker.exe")))
+    launcher_ids = {p["ProcessId"] for p in processes
+                    if ntpath.normcase(ntpath.normpath(p.get("ExecutablePath") or "")) == executable}
+    targets = set(launcher_ids)
+    prefix = ntpath.normcase(ntpath.normpath(str(downloads))).rstrip("\\") + "\\"
+    for process in processes:
+        if (process.get("Name") or "").lower() not in ("java.exe", "javaw.exe"):
+            continue
+        command = (process.get("CommandLine") or "").replace("/", "\\").lower()
+        if process.get("ParentProcessId") in launcher_ids or (prefix in command and ".patch" in command):
+            targets.add(process["ProcessId"])
+    return sorted(targets)
+
+
+def close_instances(install, downloads):
+    for attempt in range(3):
+        targets = target_processes(process_inventory(), install, downloads)
+        if not targets:
+            return
+        print("Closing CheatBreaker and its game processes...")
+        for pid in targets:
+            # PID-targeted tree shutdown also covers launcher child processes.
+            # Java applications unrelated to CheatBreaker are never selected.
+            command = ["taskkill", "/PID", str(pid), "/T"]
+            if attempt:
+                command.append("/F")
+            subprocess.run(command, capture_output=True, text=True, errors="replace")
+        time.sleep(1)
+    if target_processes(process_inventory(), install, downloads):
+        raise RuntimeError("Could not close CheatBreaker or its game. No files were restored.")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", action="version", version="cia unpatcher " + VERSION)
+    parser.add_argument("--version", action="version", version="cia unpatcher " + VERSION + " (" + BUILD + ")")
     parser.add_argument("--dry-run", action="store_true", help="Show the restoration plan without changing files")
     options = parser.parse_args()
     if os.name != "nt" or not os.environ.get("APPDATA") or not os.environ.get("LOCALAPPDATA"):
         raise RuntimeError("Run this program in a normal Windows user session")
     roaming = Path(os.environ["APPDATA"])
     resources = Path(os.environ["LOCALAPPDATA"]) / "Programs/cheatbreaker/resources"
-    print("cia unpatcher " + VERSION)
+    print("cia unpatcher " + VERSION + " (" + BUILD + ")")
+    downloads = roaming / "CheatBreaker/downloads"
+    settings = roaming / "CheatBreaker/launcher/settings.json"
+    if settings.is_file():
+        configured = json.loads(settings.read_text(encoding="utf-8-sig")).get("downloads_dir")
+        if configured:
+            downloads = Path(configured)
+    def plan():
+        return build_plan(resources, downloads / "versions",
+                          roaming / ".minecraft/cheatbreaker_accounts.json",
+                          roaming / ".minecraft/offline_username.txt")
+    actions, notices = plan()
     if not options.dry_run:
-        while running_game():
-            input("Close CheatBreaker and Minecraft (javaw.exe), then press Enter to continue...")
-    actions, notices = build_plan(resources, roaming / "CheatBreaker/downloads/versions",
-                                  roaming / ".minecraft/cheatbreaker_accounts.json",
-                                  roaming / ".minecraft/offline_username.txt")
+        close_instances(resources.parent, downloads)
+        actions, notices = plan()
     for notice in notices:
         print(notice)
     for action in actions:
@@ -272,14 +316,32 @@ def main():
 
 if __name__ == "__main__":
     result = 0
+    log_stream = None
+    if len(sys.argv) == 1 and os.environ.get("LOCALAPPDATA"):
+        log_path = Path(os.environ["LOCALAPPDATA"]) / "cia_unpatcher/cia_unpatcher.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_stream = log_path.open("a", encoding="utf-8")
+        class Output:
+            def __init__(self, console, log):
+                self.console, self.log = console, log
+            def write(self, text):
+                self.log.write(text)
+                self.log.flush()
+                if self.console:
+                    self.console.write(text)
+            def flush(self):
+                self.log.flush()
+                if self.console:
+                    self.console.flush()
+        sys.stdout = Output(sys.stdout, log_stream)
+        print("\n" + time.strftime("%Y-%m-%d %H:%M:%S"))
     try:
         main()
     except (Exception, KeyboardInterrupt) as error:
         print("Error: " + (str(error) or "Cancelled"))
         result = 1
-    if len(sys.argv) == 1 and sys.stdin.isatty():
-        try:
-            input("Press Enter to close...")
-        except (EOFError, KeyboardInterrupt):
-            pass
+    if log_stream:
+        sys.stdout.flush()
+        sys.stdout = sys.__stdout__
+        log_stream.close()
     sys.exit(result)

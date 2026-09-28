@@ -25,7 +25,7 @@ the version without modifying the installation or checking for updates.
 
 ## Validation
 
-- The repaired installed 1.8.9 client completed loading; the user confirmed play works.
+- Minecraft 1.8.9 completed loading and reached the multiplayer screen.
 - Isolated tests on backed-up 1.7.10 and 1.8.9 clients changed exactly one class
   per jar, preserved class versions, and matched the installed working repair.
 - Original jar backups matched byte-for-byte.

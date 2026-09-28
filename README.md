@@ -39,8 +39,9 @@ Game client (Java, 1.7.10 and 1.8.9):
 
 ## Restore the official launcher
 
-Download `cia_unpatcher_1.1.7.exe` from the same release. Close CheatBreaker and
-Minecraft, then run it. The EXE is standalone and does not contain any user
+Download `cia_unpatcher_1.1.7.exe` from the same release and run it. The automatic
+build closes CheatBreaker and its game processes, restores the files, then exits
+without keyboard input. Other Java applications are left running. The EXE is standalone and does not contain any user
 accounts or game files.
 
 It restores available `.ORIGINAL` backups, validates the native files, removes
@@ -57,6 +58,8 @@ stops before changing files and asks you to reinstall official CheatBreaker.
 
 Use `cia_unpatcher_1.1.7.exe --dry-run` to inspect the restoration plan without
 changing anything, or `--version` to check the build.
+The automatic build reports `cia unpatcher 1.1.7 (automatic)`. Its log is saved
+to `%LOCALAPPDATA%\cia_unpatcher\cia_unpatcher.log`.
 
 ## Notes
 

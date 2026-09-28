@@ -1,7 +1,7 @@
 # how_to_update.md — cia patcher engineering bible
 
 This document is the single source of context for the `cia patcher` project. It is written
-for a human engineer or an AI agent taking over the project: it explains what the system is,
+for maintaining the project: it explains what the system is,
 how it was reverse engineered, which rules must never be broken, every trap hit so far, and
 the exact procedures to produce a patch for a new CheatBreaker version and ship it.
 
