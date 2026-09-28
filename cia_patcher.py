@@ -34,8 +34,23 @@ except ImportError:
     BUILD_DATE, BUILD_TIME = "", ""
 HEADER = f"cia patcher {BUILD_DATE} at {BUILD_TIME} on cheatbreaker {VERSION}"
 
+LOG_FILE = None
+
+
+def log(msg):
+    """Persist every step next to the exe so failures stay readable."""
+    global LOG_FILE
+    if LOG_FILE is None:
+        base = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+        LOG_FILE = os.path.join(base, "cia_patcher.log")
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(msg + "\n")
+    except OSError:
+        pass
+
 # self-update: pinned to the latest.json published in the patcher repository
-PATCHER_VERSION = "1.1.1"
+PATCHER_VERSION = "1.1.2"
 UPDATE_URL = ("https://raw.githubusercontent.com/ryad313/crack-account-cheatbreaker/main/latest.json")
 
 # ---------------------------------------------------------------- JS patches (renderer bundle)
@@ -223,6 +238,7 @@ _line = {"len": 0}
 
 
 def show(text):
+    log(text)
     if sys.stdout.isatty():
         sys.stdout.write("\r" + text + " " * max(_line["len"] - len(text), 0))
         sys.stdout.flush()
@@ -239,6 +255,12 @@ def newline():
 def fail(msg):
     newline()
     print(f"Error: {msg}")
+    log("ERROR: " + msg)
+    try:
+        if sys.stdout.isatty():
+            input("Press Enter to close...")
+    except Exception:
+        pass
     sys.exit(1)
 
 
@@ -838,15 +860,11 @@ def main():
 
         name = ask_nickname()
 
+        add_account(name)
+
         patch_launcher()
 
-        java_exe = find_java_exe()
-        java_assets = load_java_assets()
-        if java_exe and not java_assets:
-            show("Java assets... missing (embedded_java.json)")
-        patch_client(java_exe, java_assets)
-
-        add_account(name)
+        patch_client(find_java_exe(), load_java_assets())
 
         start_game()
     except KeyboardInterrupt:
