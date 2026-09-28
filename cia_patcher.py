@@ -50,7 +50,7 @@ def log(msg):
         pass
 
 # self-update: pinned to the latest.json published in the patcher repository
-PATCHER_VERSION = "1.1.2"
+PATCHER_VERSION = "1.1.3"
 UPDATE_URL = ("https://raw.githubusercontent.com/ryad313/crack-account-cheatbreaker/main/latest.json")
 
 # ---------------------------------------------------------------- JS patches (renderer bundle)
@@ -275,9 +275,16 @@ def close_instances():
             continue
         subprocess.run(["taskkill", "/IM", image, "/F"],
                        capture_output=True, text=True, errors="replace")
+        time.sleep(2)   # les process mettent un moment a mourir
         r2 = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {image}"],
                             capture_output=True, text=True, errors="replace")
         if image in r2.stdout:
+            subprocess.run(["taskkill", "/IM", image, "/F"],
+                           capture_output=True, text=True, errors="replace")
+            time.sleep(2)
+        r3 = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {image}"],
+                            capture_output=True, text=True, errors="replace")
+        if image in r3.stdout:
             if image == "javaw.exe":
                 # may belong to an unrelated Java app; jar writes will retry and
                 # fail with a clear message only if it actually holds our files
@@ -572,6 +579,9 @@ def patch_launcher():
         if not js_path:
             fail("renderer bundle not found - expected CheatBreaker 2026.9.1.")
 
+        orig_copy = js_path + ".orig.tmp"
+        shutil.copy2(js_path, orig_copy)
+
         with open(js_path, "rb") as f:
             code = f.read().decode("utf-8", errors="ignore")
         code, applied, _ = patch_js_source(code)
@@ -592,7 +602,7 @@ def patch_launcher():
             with open(wfa, "w", encoding="utf-8", newline="") as f:
                 f.write(wfa_code)
 
-        _node_syntax_gate(js_path)
+        _node_syntax_gate(js_path, reference_path=orig_copy)
         if os.path.exists(wfa):
             _node_syntax_gate(wfa)
         show(f"Patching launcher... {len(applied)} patches")
@@ -639,17 +649,30 @@ def _find_renderer_file(tmp):
     return None
 
 
-def _node_syntax_gate(js_path):
-    """Rule: node --check (ESM) the patched bundle when node is available."""
+def _node_syntax_check(node, path):
+    """True when node --check (ESM copy) accepts the file."""
+    mjs = path + ".check.mjs"
+    shutil.copy2(path, mjs)
+    r = subprocess.run([node, "--check", mjs], capture_output=True, text=True)
+    os.remove(mjs)
+    return r.returncode == 0
+
+
+def _node_syntax_gate(js_path, reference_path=None):
+    """node --check the patched bundle; if node cannot parse the ORIGINAL
+    bundle either (node too old for CB's syntax), the gate is skipped."""
     node = shutil.which("node")
     if not node:
         return
-    mjs = js_path + ".check.mjs"
-    shutil.copy2(js_path, mjs)
-    r = subprocess.run([node, "--check", mjs], capture_output=True, text=True)
-    os.remove(mjs)
-    if r.returncode != 0:
-        fail("patched renderer bundle failed the syntax gate - aborting (no changes kept)")
+    if reference_path and not _node_syntax_check(node, reference_path):
+        log("syntax gate skipped: node cannot parse the original bundle either")
+        return
+    if not _node_syntax_check(node, js_path):
+        try:
+            shutil.copy2(js_path, js_path + ".failed.mjs")
+        except OSError:
+            pass
+        fail("patched bundle failed the syntax gate - aborting (no changes kept)")
 
 
 def _replace_with_retry(src, dst):
