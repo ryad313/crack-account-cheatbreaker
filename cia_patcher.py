@@ -50,7 +50,7 @@ def log(msg):
         pass
 
 # self-update: pinned to the latest.json published in the patcher repository
-PATCHER_VERSION = "1.1.5"
+PATCHER_VERSION = "1.1.7"
 UPDATE_URL = ("https://raw.githubusercontent.com/ryad313/crack-account-cheatbreaker/main/latest.json")
 
 # ---------------------------------------------------------------- JS patches (renderer bundle)
@@ -754,6 +754,11 @@ def patch_client(java_exe, java_assets):
         if r.returncode != 0:
             tail = [l for l in log.splitlines() if l.strip()][-1:] or ["?"]
             failed.append(f"{ver}: {tail[0][:80]}")
+            shutil.rmtree(outdir, ignore_errors=True)
+            continue
+        if "NO_CB_MOD:" in log:
+            done.append(f"{ver} (vanilla, unchanged)")
+            shutil.rmtree(outdir, ignore_errors=True)
             continue
         # injecter les classes patchees dans le jar
         patched = {}
@@ -763,6 +768,8 @@ def patch_client(java_exe, java_assets):
                     full = os.path.join(root, f)
                     rel = os.path.relpath(full, outdir).replace("\\", "/")
                     patched[rel] = open(full, "rb").read()
+        if not os.path.exists(jar + ".ORIGINAL"):
+            shutil.copy2(jar, jar + ".ORIGINAL")
         tmp = jar + ".tmp"
         with zipfile.ZipFile(jar) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
             injected = 0
@@ -907,6 +914,9 @@ def start_game():
 
 # ---------------------------------------------------------------- main
 def main():
+    if sys.argv[1:] == ["--version"]:
+        print(f"cia patcher {PATCHER_VERSION}")
+        return
     if os.name != "nt":
         fail("Windows only - CheatBreaker is a Windows application")
     if not os.environ.get("LOCALAPPDATA") or not os.environ.get("APPDATA"):

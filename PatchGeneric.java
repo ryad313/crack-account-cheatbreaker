@@ -2,6 +2,11 @@ import javassist.*;
 import javassist.expr.ExprEditor;
 import javassist.expr.FieldAccess;
 import javassist.expr.MethodCall;
+import javassist.bytecode.Bytecode;
+import javassist.bytecode.CodeAttribute;
+import javassist.bytecode.ConstPool;
+import javassist.bytecode.MethodInfo;
+import javassist.bytecode.Opcode;
 import java.io.*;
 import java.util.*;
 import java.util.jar.JarFile;
@@ -12,10 +17,10 @@ import java.util.jar.JarEntry;
  * Fingerprint-based identification (survives client rebuilds):
  *   1. pool class = the one containing "Authenticating with the server."
  *      and "SINGLEPLAYER" literals;
- *   2. gate getter = the 0-arg boolean method called >= 4 times from a class
- *      that references the pool's String[] field >= 3 times;
+ *   2. gate getter = the unique 0-arg boolean method used for at least four
+ *      button setters and another check in a class referencing the pool;
  *   3. patch = replace the getter BODY with `return true;` (no call-site
- *      edits, no stack-map rebuild issues).
+ *      edits), preserving the class version and all unrelated stack maps.
  *
  * Usage: java -cp <javassist.jar>:<this> PatchGeneric <client.jar> <outDir>
  * Output: patched classes written to <outDir>, names printed on stdout.
@@ -28,6 +33,7 @@ public class PatchGeneric {
         File jarForPool = srcJar.getName().endsWith(".jar")
                 ? srcJar : File.createTempFile("cbclient", ".jar");
         if (!srcJar.getName().endsWith(".jar")) {
+            jarForPool.deleteOnExit();
             try (InputStream in = new FileInputStream(srcJar);
                  OutputStream out = new FileOutputStream(jarForPool)) {
                 byte[] buf = new byte[65536];
@@ -40,7 +46,7 @@ public class PatchGeneric {
 
         // ---- 1) locate the string-pool class by fingerprint
         String poolClass = null;
-        JarFile jar = new JarFile(jarForPool);
+        try (JarFile jar = new JarFile(jarForPool)) {
         Enumeration<JarEntry> entries = jar.entries();
         while (entries.hasMoreElements()) {
             JarEntry je = entries.nextElement();
@@ -52,7 +58,14 @@ public class PatchGeneric {
                 break;
             }
         }
-        if (poolClass == null) throw new Exception("string pool class not found");
+        if (poolClass == null) {
+            if (jar.getJarEntry("net/minecraft/client/main/Main.class") != null
+                    && jar.getJarEntry("Start.class") == null) {
+                System.out.println("NO_CB_MOD: vanilla client, nothing to patch");
+                return;
+            }
+            throw new Exception("unsupported client: title-screen string pool not found");
+        }
         final String fPoolClass = poolClass;
         System.out.println("pool class: " + poolClass);
 
@@ -82,9 +95,9 @@ public class PatchGeneric {
             CtClass c;
             try { c = pool.get(cn); } catch (Exception e) { continue; }
             if (c.isFrozen()) continue;
-            try { c.getClassFile().setMajorVersion(48); } catch (Exception e) { }
             final int[] poolRefs = {0};
             final Map<String, Integer> boolCalls = new HashMap<>();
+            final Map<String, Integer> buttonCalls = new HashMap<>();
             final Map<String, String> boolDecl = new HashMap<>();
             try {
                 c.instrument(new ExprEditor() {
@@ -105,6 +118,9 @@ public class PatchGeneric {
                                 String key = decl + "." + mc.getMethodName();
                                 boolCalls.merge(key, 1, Integer::sum);
                                 boolDecl.putIfAbsent(key, decl);
+                                if (feedsBooleanSetter(mc)) {
+                                    buttonCalls.merge(key, 1, Integer::sum);
+                                }
                             }
                         } catch (Exception e) { /* ignore */ }
                     }
@@ -112,7 +128,8 @@ public class PatchGeneric {
             } catch (Exception e) { continue; }
             if (poolRefs[0] < 3) continue;
             for (Map.Entry<String, Integer> e : boolCalls.entrySet()) {
-                if (e.getValue() >= 4) {
+                int setters = buttonCalls.getOrDefault(e.getKey(), 0);
+                if (setters >= 4 && e.getValue() > setters) {
                     String decl = boolDecl.get(e.getKey());
                     String method = e.getKey().substring(e.getKey().lastIndexOf('.') + 1);
                     String gKey = decl + "." + method;
@@ -125,11 +142,14 @@ public class PatchGeneric {
             }
         }
         if (gateGetters.isEmpty()) throw new Exception("gate getter not found");
+        if (gateGetters.size() != 1) {
+            throw new Exception("ambiguous title-screen gate: " + gateGetters.keySet());
+        }
         for (Map.Entry<String, String> e : gateGetters.entrySet()) {
             System.out.println("gate getter: " + e.getKey() + " (declares in " + e.getValue() + ")");
         }
 
-        // ---- 3) patch each gate getter body: return true (no call-site edits)
+        // ---- 3) patch the uniquely identified getter without changing the class format
         int patched = 0;
         for (Map.Entry<String, String> e : gateGetters.entrySet()) {
             String full = e.getKey();
@@ -137,15 +157,45 @@ public class PatchGeneric {
             String methName = full.substring(full.lastIndexOf('.') + 1);
             CtClass cc = pool.get(declClass);
             cc.defrost();
-            try { cc.getClassFile().setMajorVersion(48); } catch (Exception ex) { }
             CtMethod m = cc.getDeclaredMethod(methName);
-            m.setBody("return true;");
+            replaceBooleanBody(m);
             cc.writeFile(args[1]);
             patched++;
             System.out.println("patched: " + declClass + "." + methName);
         }
         if (patched == 0) throw new Exception("nothing patched");
         System.out.println("DONE classes=" + patched);
+        }
+    }
+
+    static boolean feedsBooleanSetter(MethodCall call) {
+        CodeAttribute code = call.where().getMethodInfo2().getCodeAttribute();
+        byte[] bytes = code.getCode();
+        int opcode = bytes[call.indexOfBytecode()] & 0xff;
+        int next = call.indexOfBytecode() + (opcode == Opcode.INVOKEINTERFACE ? 5 : 3);
+        if (next + 2 >= bytes.length || (bytes[next] & 0xff) != Opcode.INVOKEVIRTUAL) {
+            return false;
+        }
+        int index = ((bytes[next + 1] & 0xff) << 8) | (bytes[next + 2] & 0xff);
+        ConstPool constants = code.getConstPool();
+        return "(Z)V".equals(constants.getMethodrefType(index));
+    }
+
+    static void replaceBooleanBody(CtMethod method) throws Exception {
+        if (!"()Z".equals(method.getSignature())
+                || Modifier.isAbstract(method.getModifiers())
+                || Modifier.isNative(method.getModifiers())) {
+            throw new IllegalArgumentException("Expected a concrete zero-argument boolean getter");
+        }
+        // This straight-line body needs no stack-map frames. Replacing only its
+        // Code attribute avoids rebuilding obfuscated methods or downgrading a
+        // class that still contains Java 7+ constants such as InvokeDynamic.
+        MethodInfo info = method.getMethodInfo();
+        int locals = Modifier.isStatic(method.getModifiers()) ? 0 : 1;
+        Bytecode body = new Bytecode(info.getConstPool(), 1, locals);
+        body.addIconst(1);
+        body.addOpcode(Opcode.IRETURN);
+        info.setCodeAttribute(body.toCodeAttribute());
     }
 
     static boolean isObfuscated(String cn) {

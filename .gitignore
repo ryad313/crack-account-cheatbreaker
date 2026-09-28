@@ -10,3 +10,5 @@ build/
 dist/
 accounts_user_backup.json
 *accounts*backup*
+cia_patcher.log
+patched_*.failed.mjs

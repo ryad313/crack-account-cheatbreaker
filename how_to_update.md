@@ -7,6 +7,18 @@ the exact procedures to produce a patch for a new CheatBreaker version and ship 
 
 Read it fully once before touching anything.
 
+Current implementation (v1.1.7): Java patching uses the embedded, compiled
+`PatchGeneric.java`, not the historical hash-pinned classes described below.
+It identifies one getter using four boolean setters and another check, then
+replaces only its Code attribute. Never downgrade class-file versions: v1.1.6
+did so and caused an InvokeDynamic `ClassFormatError`. Recompile PatchGeneric
+and regenerate `embedded_java.json` before packaging any Java fix. See
+[v1.1.7 validation and migration limits](BUILD_V1.1.7.md).
+
+Release assets and the URL in `latest.json` must both use
+`cia_patcher_<version>.exe`. Push the update manifest only after the uploaded
+asset is downloadable and verified. Never track runtime logs or account files.
+
 ---
 
 ## 0. What you are working on
