@@ -37,6 +37,27 @@ Game client (Java, 1.7.10 and 1.8.9):
 - Windows with CheatBreaker 2026.9.1 installed
 - Launch the game once before first use (the client jar must exist)
 
+## Restore the official launcher
+
+Download `cia_unpatcher_1.1.7.exe` from the same release. Close CheatBreaker and
+Minecraft, then run it. The EXE is standalone and does not contain any user
+accounts or game files.
+
+It restores available `.ORIGINAL` backups, validates the native files, removes
+only offline accounts identified as created by this patcher, and preserves all
+other account entries. It saves the previous state under
+`%APPDATA%\CheatBreaker\unpatch-backups`; keep those backups private because
+they can contain account credentials. Original backups are retained.
+
+When no usable client-jar backup exists, the client jar and its version metadata
+are backed up and removed from the download cache so the official launcher can
+download them again. Worlds, servers and gameplay settings are left untouched.
+If the patched launcher's `app.asar.ORIGINAL` is missing or invalid, the tool
+stops before changing files and asks you to reinstall official CheatBreaker.
+
+Use `cia_unpatcher_1.1.7.exe --dry-run` to inspect the restoration plan without
+changing anything, or `--version` to check the build.
+
 ## Notes
 
 - v1.1.7 fixes the Java class-format crash in v1.1.6. If v1.1.6 already modified your game clients, restore pristine client jars before applying v1.1.7; the new patcher does not undo the old changes automatically. See [build and validation notes](BUILD_V1.1.7.md).
