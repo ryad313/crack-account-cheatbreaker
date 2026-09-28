@@ -50,7 +50,7 @@ def log(msg):
         pass
 
 # self-update: pinned to the latest.json published in the patcher repository
-PATCHER_VERSION = "1.1.3"
+PATCHER_VERSION = "1.1.4"
 UPDATE_URL = ("https://raw.githubusercontent.com/ryad313/crack-account-cheatbreaker/main/latest.json")
 
 # ---------------------------------------------------------------- JS patches (renderer bundle)
@@ -592,19 +592,27 @@ def patch_launcher():
         if os.path.exists(wfa):
             with open(wfa, encoding="utf-8") as f:
                 wfa_code = f.read()
+            wfa_ok = True
             for name, anchor, replacement, marker in WFA_PATCHES:
                 if marker in wfa_code:
                     continue
                 n = wfa_code.count(anchor)
                 if n != 1:
-                    fail(f"write-file-atomic anchor '{name}' found {n}x - unsupported build")
+                    wfa_ok = False
+                    log(f"write-file-atomic anchor '{name}' found {n}x - skipping WFA patch")
+                    break
                 wfa_code = wfa_code.replace(anchor, replacement)
-            with open(wfa, "w", encoding="utf-8", newline="") as f:
-                f.write(wfa_code)
+            if wfa_ok:
+                with open(wfa, "w", encoding="utf-8", newline="") as f:
+                    f.write(wfa_code)
 
         _node_syntax_gate(js_path, reference_path=orig_copy)
         if os.path.exists(wfa):
-            _node_syntax_gate(wfa)
+            if not _node_syntax_gate(wfa, fatal=False, label="write-file-atomic"):
+                # restaure le wfa original: le launcher tourne sans le retry
+                with zipfile.ZipFile(asar) as z:
+                    with open(wfa, "wb") as f:
+                        f.write(z.read("node_modules/write-file-atomic/index.js"))
         show(f"Patching launcher... {len(applied)} patches")
 
         tmp_asar = asar + ".tmp"
@@ -658,21 +666,46 @@ def _node_syntax_check(node, path):
     return r.returncode == 0
 
 
-def _node_syntax_gate(js_path, reference_path=None):
-    """node --check the patched bundle; if node cannot parse the ORIGINAL
-    bundle either (node too old for CB's syntax), the gate is skipped."""
+def _node_version(node):
+    try:
+        return subprocess.run([node, "--version"], capture_output=True, text=True).stdout.strip()
+    except Exception:
+        return "?"
+
+
+def _node_syntax_gate(js_path, reference_path=None, fatal=True, label="renderer"):
+    """node --check the patched file. A reference (the unpatched original)
+    makes the gate skip when node itself is too old for CB's syntax."""
     node = shutil.which("node")
     if not node:
-        return
+        return True
+    node_v = _node_version(node)
+    log(f"syntax gate ({label}): node {node_v}")
     if reference_path and not _node_syntax_check(node, reference_path):
         log("syntax gate skipped: node cannot parse the original bundle either")
-        return
-    if not _node_syntax_check(node, js_path):
-        try:
-            shutil.copy2(js_path, js_path + ".failed.mjs")
-        except OSError:
-            pass
-        fail("patched bundle failed the syntax gate - aborting (no changes kept)")
+        return True
+    if _node_syntax_check(node, js_path):
+        return True
+    # save the failing file next to the exe for diagnosis
+    try:
+        base = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+        saved = os.path.join(base, "patched_" + label + ".failed.mjs")
+        shutil.copy2(js_path, saved)
+    except OSError:
+        saved = "(save failed)"
+    mjs = js_path + ".check.mjs"
+    shutil.copy2(js_path, mjs)
+    r = subprocess.run([node, "--check", mjs], capture_output=True, text=True, errors="replace")
+    err_first = ""
+    for line in (r.stderr or "").splitlines():
+        if "SyntaxError" in line:
+            err_first = line.strip()
+            break
+    msg = f"node {node_v} rejected the patched {label}: {err_first or 'syntax error'} - saved: {saved}"
+    if fatal:
+        fail(msg)
+    log("WARNING: " + msg)
+    return False
 
 
 def _replace_with_retry(src, dst):
