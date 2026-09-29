@@ -1,0 +1,1 @@
+case 1:t.authorization=e.v,d={"${auth_access_token}":t.authorization.accessToken,"${auth_player_name}":t.authorization.minecraftProfile.name,"${auth_uuid}":t.authorization.minecraftProfile.id,"${user_type}":t.authorization.type,"${game_directory}":t.overrides.gameDirectory||t.root,"${assets_root}":l},f=function(e,t){

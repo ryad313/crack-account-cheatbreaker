@@ -7,13 +7,22 @@ the exact procedures to produce a patch for a new CheatBreaker version and ship 
 
 Read it fully once before touching anything.
 
-Current implementation (v1.1.7): Java patching uses the embedded, compiled
+Current implementation (v1.1.8): Java patching uses the embedded, compiled
 `PatchGeneric.java`, not the historical hash-pinned classes described below.
 It identifies one getter using four boolean setters and another check, then
 replaces only its Code attribute. Never downgrade class-file versions: v1.1.6
 did so and caused an InvokeDynamic `ClassFormatError`. Recompile PatchGeneric
 and regenerate `embedded_java.json` before packaging any Java fix. See
 [v1.1.7 validation and migration limits](BUILD_V1.1.7.md).
+
+v1.1.8 provisions genuine clients through `cia_client.py` before launcher patching.
+Packages and metadata are SHA256-pinned; patching happens in staging and prior
+files are backed up before replacement. Runtime provisioning uses the official
+Java 25 archive. The renderer now verifies preparation receipts and never
+bootstraps vanilla. Legacy bootstrap strings remain only as exact migration
+patterns. `cia_unpatcher.py` is also imported for targeted process shutdown.
+PyInstaller must include both modules and `embedded_java.json`. See
+[the current build notes](BUILD_V1.1.8.md); older flow descriptions below are historical.
 
 Release assets and the URL in `latest.json` must both use
 `cia_patcher_<version>.exe`. Push the update manifest only after the uploaded

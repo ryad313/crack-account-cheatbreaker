@@ -17,6 +17,8 @@ import tempfile
 import time
 import urllib.request
 import zipfile
+from pathlib import Path
+import cia_client
 
 APP_NAME = "CheatBreaker"
 INSTALL_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "cheatbreaker")
@@ -50,12 +52,24 @@ def log(msg):
         pass
 
 # self-update: pinned to the latest.json published in the patcher repository
-PATCHER_VERSION = "1.1.7"
+PATCHER_VERSION = "1.1.8"
 UPDATE_URL = ("https://raw.githubusercontent.com/ryad313/crack-account-cheatbreaker/main/latest.json")
 
 # ---------------------------------------------------------------- JS patches (renderer bundle)
 # Each patch: unique anchor -> replacement, marker proves it is already applied.
 JS_PATCHES = [
+    (
+        # Vanilla metadata includes placeholders absent from CB's custom version
+        # files. Passing ${user_properties} literally makes Gson fail at startup.
+        "vanilla launch placeholders",
+        '"${assets_root}":l},f=function(e,t){',
+        '"${assets_root}":l,"${user_properties}":"{}",'
+        '"${version_name}":r.id||n.id||t.version.number,'
+        '"${assets_index_name}":(r.assetIndex&&r.assetIndex.id)||'
+        '(n.assetIndex&&n.assetIndex.id)||r.assets||n.assets||t.version.number,'
+        '"${version_type}":r.type||n.type||"release"},f=function(e,t){',
+        '"${user_properties}":"{}"',
+    ),
     (
         "offline login",
         '{key:"runDeviceCodeLogin",value:function(e){var t=this;Jr.log("Running Device Code Auth Protocol");',
@@ -210,6 +224,51 @@ JS_PATCHES = [
     ),
 ]
 
+
+# Replace legacy vanilla fallbacks exactly before applying the current patches.
+# Keeping exact previous replacements makes migration fail on unknown bundles.
+LEGACY_BOOTSTRAP = [p for p in JS_PATCHES if p[0] in (
+    "launch fallback", "client bootstrap", "migrate java version", "migrate jar ensure")]
+JS_PATCHES = [p for p in JS_PATCHES if p not in LEGACY_BOOTSTRAP]
+OFFLINE_ACTIVE = 'na.accounts.some(function(e){return e.localId===na.profileId&&"0"===e.accessToken})'
+CLIENT_CHECK = (
+    'function(_dd,_ver){'
+    'if(!["1.7.10","1.8.9"].includes(_ver))throw new Error("Unsupported CheatBreaker version");'
+    'var _dir=(0,q.join)(_dd,"versions",_ver),'
+    '_receipt=JSON.parse((0,Z.readFileSync)((0,q.join)(_dir,".cia-client.json"),"utf-8")),'
+    '_meta=(0,Z.readFileSync)((0,q.join)(_dir,_ver+".json")),'
+    '_jar=(0,Z.readFileSync)((0,q.join)(_dir,_ver+".patch"));'
+    'if(_receipt.revision!=="1.1.8"||_receipt.version!==_ver||'
+    'JSON.parse(_meta.toString("utf-8")).mainClass!=="Start"||'
+    'G.createHash("sha256").update(_jar).digest("hex")!==_receipt.jar||'
+    'G.createHash("sha256").update(_meta).digest("hex")!==_receipt.metadata)'
+    'throw new Error("CheatBreaker client changed; run cia patcher again.");'
+    'return !0}'
+)
+JS_PATCHES.extend([
+    (
+        'prepared client fallback', LEGACY_BOOTSTRAP[0][1],
+        'Hr.continueLaunchTimeoutId=setTimeout(function(){Hr.clearContinueLaunchTimeout(),'
+        'Hr.continueLaunchResolver&&(function(){var _res=Hr.continueLaunchResolver;'
+        'Hr.continueLaunchResolver=null;'
+        'if(!(' + OFFLINE_ACTIVE + ')){_res(null);return}'
+        '(async function(){try{var _ver=t,_dd=await Wt.get("downloads_dir");'
+        '(' + CLIENT_CHECK + ')(_dd,_ver);'
+        'vr.log("CB Offline: using prepared CheatBreaker client "+_ver);'
+        '_res({branch:"offline",client:"",hash:"offline",version:_ver,javaVersion:"25"})'
+        '}catch(_e){vr.error("CB Offline: genuine client unavailable: "+_e);'
+        'Ce({title:"CheatBreaker client missing",message:"Run cia patcher again to repair the CheatBreaker client.",type:"error",duration:1e4});_res(null)}})()})()},1e4)',
+        'CB Offline: using prepared CheatBreaker client ',
+    ),
+    (
+        'prepared client check', LEGACY_BOOTSTRAP[1][1],
+        'e.n=8,' + OFFLINE_ACTIVE + '?Promise.resolve().then(function(){'
+        'vr.log("CB Offline: verifying prepared CheatBreaker client "+t);'
+        'return (' + CLIENT_CHECK + ')(i,t)}):ke((0,q.join)(i,"versions",t,"".concat(t,".patch")),o.hash)',
+        'CB Offline: verifying prepared CheatBreaker client ',
+    ),
+])
+
 # ---------------------------------------------------------------- patched Java title-screen classes
 # Embedded pre-compiled (Javassist): every isAuthed() call replaced with `true`.
 # original_sha256 pins the supported client build; a mismatch means an unsupported
@@ -277,33 +336,18 @@ def fail(msg):
 
 # ---------------------------------------------------------------- step 1: kill running instances
 def close_instances():
-    status = []
-    for image in ("CheatBreaker.exe", "javaw.exe"):
-        r = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {image}"],
-                           capture_output=True, text=True, errors="replace")
-        if image not in r.stdout:
-            status.append(f"{image}: not running")
-            continue
-        subprocess.run(["taskkill", "/IM", image, "/F"],
-                       capture_output=True, text=True, errors="replace")
-        time.sleep(2)   # les process mettent un moment a mourir
-        r2 = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {image}"],
-                            capture_output=True, text=True, errors="replace")
-        if image in r2.stdout:
-            subprocess.run(["taskkill", "/IM", image, "/F"],
-                           capture_output=True, text=True, errors="replace")
-            time.sleep(2)
-        r3 = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {image}"],
-                            capture_output=True, text=True, errors="replace")
-        if image in r3.stdout:
-            if image == "javaw.exe":
-                # may belong to an unrelated Java app; jar writes will retry and
-                # fail with a clear message only if it actually holds our files
-                status.append(f"{image}: still running (unrelated Java app?)")
-                continue
-            fail(f"could not close {image} - close it manually and rerun")
-        status.append(f"{image}: closed")
-    return "; ".join(status)
+    from cia_unpatcher import close_instances as close_cb
+    close_cb(Path(INSTALL_DIR), Path(configured_clients()).parent)
+
+
+def configured_clients():
+    settings = Path(os.environ["APPDATA"]) / "CheatBreaker/launcher/settings.json"
+    if settings.exists():
+        with settings.open(encoding="utf-8-sig") as stream:
+            downloads = json.load(stream).get("downloads_dir")
+        if downloads:
+            return os.path.join(downloads, "versions")
+    return CLIENTS_DIR
 
 
 # ---------------------------------------------------------------- step 3: nickname
@@ -528,6 +572,11 @@ WFA_PATCHES = [
 
 def patch_js_source(code):
     applied, skipped = [], []
+    # Normalise v1.0-v1.1.7 paths back to their official anchors.
+    code = code.replace(LEGACY_BOOTSTRAP[2][1], LEGACY_BOOTSTRAP[2][2])
+    code = code.replace(LEGACY_BOOTSTRAP[3][1], LEGACY_BOOTSTRAP[1][1])
+    for name, anchor, replacement, marker in LEGACY_BOOTSTRAP[:2]:
+        code = code.replace(replacement, anchor)
     for name, anchor, replacement, marker in JS_PATCHES:
         if marker in code:
             skipped.append(name)
@@ -731,19 +780,18 @@ def _replace_with_retry(src, dst):
 
 
 # ---------------------------------------------------------------- step: game client
-def patch_client(java_exe, java_assets):
+def patch_client(java_exe, java_assets, clients_dir=None):
+    clients_dir = clients_dir or CLIENTS_DIR
     show("Patching game client...")
     if not java_exe:
-        show("Patching game client... SKIPPED (no Java found - launch the game once, then rerun)")
-        return
-    if not os.path.isdir(CLIENTS_DIR):
-        show("Patching game client... SKIPPED (launch the game once, then rerun)")
-        return
+        raise ValueError("Java is unavailable for client preparation")
+    if not os.path.isdir(clients_dir):
+        raise ValueError("CheatBreaker clients are missing")
 
     javassist_jar, pg_dir = java_assets
     done, failed = [], []
-    for ver in sorted(os.listdir(CLIENTS_DIR)):
-        jar = os.path.join(CLIENTS_DIR, ver, ver + ".patch")
+    for ver in sorted(os.listdir(clients_dir)):
+        jar = os.path.join(clients_dir, ver, ver + ".patch")
         if not os.path.isfile(jar):
             continue
         outdir = tempfile.mkdtemp(prefix="cia_pg_")
@@ -757,7 +805,7 @@ def patch_client(java_exe, java_assets):
             shutil.rmtree(outdir, ignore_errors=True)
             continue
         if "NO_CB_MOD:" in log:
-            done.append(f"{ver} (vanilla, unchanged)")
+            failed.append(f"{ver}: expected CheatBreaker, found vanilla")
             shutil.rmtree(outdir, ignore_errors=True)
             continue
         # injecter les classes patchees dans le jar
@@ -937,15 +985,19 @@ def main():
 
         name = ask_nickname()
 
-        add_account(name)
+        assets = load_java_assets()
+        cia_client.prepare(configured_clients(), os.environ["APPDATA"],
+                           lambda java, directory: patch_client(java, assets, directory), show)
 
         patch_launcher()
 
-        patch_client(find_java_exe(), load_java_assets())
+        add_account(name)
 
         start_game()
     except KeyboardInterrupt:
         fail("cancelled")
+    except Exception as error:
+        fail(str(error))
 
     print("\nDone. Have fun.")
 
